@@ -1,70 +1,134 @@
-# Getting Started with Create React App
+使用`htmlpdf.js`批量将`html`页面转为`pdf`，打包成`zip`下载。`htmlpdf.js`是结合`html2canvas`和`jsPDF`实现的。
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+首先先安装包
+```
+npm install --save html2pdf.js
+```
 
-## Available Scripts
+基本页面
+```
+import html2pdf from "html2pdf.js";
+function App() {
+    const handleExportPdf = () => {
+        // 导出pdf
+    }
+    const generatePdfHtml = () => {
+        return new Array(100).fill({}).map((item, index) => (
+            <div style={{ paddingBottom: "10px" }}>
+                这是第{index}句话,
+                {`这是第${index}句话`.repeat(index)}
+            </div>
+        ));
+    };
+    return (
+        <div className="App">
+            <button onClick={handleExportPdf}>导出</button>
+            <div style={{ position: "absolute", top: "-100000px" }}>
+                // 要转为pdf的页面
+                <div id="pdf1">{generatePdfHtml()}</div>
+                <div id="pdf2">{generatePdfHtml()}</div>
+                <div id="pdf3">{generatePdfHtml()}</div>
+            </div>
+        </div>
+    );
+}
 
-In the project directory, you can run:
+```
+这里需要注意的是，要转为`pdf`的元素不能设置`position`，否则导出的`pdf`是空白的。所以这里把定位设置到它的父元素上。
 
-### `npm start`
+我们先来实现单个`pdf`的导出，如果没有额外的配置要求，可以采用基本用法
+```
+const handleExportPdf = () => {
+    var element = document.getElementById('pdf1');
+    html2pdf(element);
+}
+```
+如果需要进行额外的配置，则如下：
+```
+const handleExportPdf = () => {
+    var element = document.getElementById('pdf1');
+    const opt = {
+        margin: 0, 
+        filename: "file.pdf",
+        pagebreak: {mode: ['avoid-all', 'css', 'legacy']},
+        image: { type: "jpeg", quality: 1 },
+        enableLinks: true,
+        html2canvas: { scale: 2, useCORS: true, allowTaint: false},
+        jsPDF: { },
+    };
+    html2pdf(element, opt);
+}
+```
+各参数含义如下:
+* `margin`：默认是0，`pdf`的页边距，它采用的是`jsPDF`的单位（`"pt" (points), "mm" , "cm", "in"`，默认是`"mm"`），值可以是数字或`[vMargin, hMargin]`或`[top, left, bottom, right]`。
+* `filename`：默认是`file.pdf`，导出`pdf`的文件名。
+* `pagebreak`：控制`pdf`的分页行为，参数如下：
+    * `mode`：默认是`["css", "legacy"]`，值为字符串或者数组，有以下几种模式：
+        * `avoid-all`：自动添加分页符，以避免将任何元素分割到多个页面。
+        * `css`：根据`CSS`的`break-before`、`break-after`和`break-inside`属性添加分页符。
+        * `legacy`：在使用`html2pdf__page-break`类的元素后面添加分页符，这个属性即将被废弃。
+    * `before`：默认为空数组，值为字符或数组，通过`css`选择器来判断在哪些元素前面添加分页符，比如`id`选择器、类选择器、标签选择器获取`*`来选择所有的元素。
+    * `after`：默认为空数组，值为字符或数组，通过`css`选择器来判断在哪些元素后面添加分页符，与`before`类似。
+    * `avoid`：默认为空数组，值为字符或数组，通过`css`选择器来避免在哪些元素上面添加分页符，与`before`类似。
+        ```
+        // 避免在所有的元素上添加分页符，在 #page2el 元素前添加分页符
+        html2pdf().set({
+            pagebreak: { mode: 'avoid-all', before: '#page2el' }
+        });
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+        // 支持所有模式，不指定元素
+        html2pdf().set({
+            pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        });
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+        // 采用默认模式，指定具体元素
+        html2pdf().set({
+            pagebreak: { before: '.beforeClass', after: ['#after1', '#after2'], avoid: 'img' }
+        });
+        ```
+* image：默认值为`{type: 'jpeg', quality: 0.95}`，生成pdf的图片的配置，有以下两个属性：
+    * type：图片类型，`HTMLCanvasElement`仅支持`png`、`jpeg`、`webp(仅chrome支持)`。
+    * quality：图片质量，值为0-1，仅对`jpeg`、`webp`生效。
+* enableLinks：默认为`true`，如果启用，PDF 超链接将自动添加到所有锚标记之上。
+* html2canvas：`scale`用来设置导出图片的缩放比例，可控制清晰度。`useCORS`这个属性可以用来启用或禁用对`CORS`的支持，`allowTaint`这个属性允许启用或禁用对跨域图像的支持，不开启这两个属性的话，非本地图片不能显示。全部配置可见[`html2canvas`](https://html2canvas.hertzen.com/configuration)
+* jsPDF：配置可见[`jsPDF`](http://rawgit.com/MrRio/jsPDF/master/docs/jsPDF.html)
 
-### `npm test`
+接下来来实现打包逻辑，先安装我们需要使用的插件
+```
+npm install jszip file-saver --save
+```
+打包代码如下：
+```
+const handleExportPdf = () => {
+    const workerList = [];
+    const zip = new JSZip();
+    const opt = {
+      margin: 0, 
+      filename: "file.pdf",
+      pagebreak: {mode: ['avoid-all', 'css', 'legacy']},
+      image: { type: "jpeg", quality: 1 },
+      enableLinks: true,
+      html2canvas: { scale: 2, useCORS: true, allowTaint: false},
+      jsPDF: { },
+    };
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
-
-### `npm run build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+    for (let i = 0; i < 3; i++) {
+      const element = document.getElementById(`pdf${i + 1}`);
+      workerList.push(html2pdf().set(opt).from(element).outputPdf("blob"));
+    }
+    
+    Promise.all([...workerList]).then((res) => {
+      res.map((v, i) => {
+        zip.file(`pdf${i + 1}.pdf`, v, { binary: true });
+      });
+      zip
+        .generateAsync({ type: "blob" })
+        .then((content) => {
+          FileSaver.saveAs(content, "pdfzip");
+        })
+        .catch((e) => {
+          console.log(e, "压缩失败");
+        });
+    })
+};
+```
